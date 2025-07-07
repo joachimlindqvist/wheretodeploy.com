@@ -8,10 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"sync/atomic"
 	"time"
-
-	"golang.org/x/sync/errgroup"
 )
 
 func main() {
@@ -68,7 +65,7 @@ func benchPersistentStorage(w http.ResponseWriter, r *http.Request) {
 	}
 	response.LargeRWPerSecond = *largeRWPerSecond
 
-	hugeRWPerSecond, err := writeFilesInSizeRangeToDir(os.TempDir(), 10, SizeRange{128 * 1024 * 1024, 2 * 1024 * 1024 * 1024})
+	hugeRWPerSecond, err := writeFilesInSizeRangeToDir(os.TempDir(), 10, SizeRange{128 * 1024 * 1024, 1024 * 1024 * 1024})
 	if err != nil {
 		fmt.Println(err)
 		w.WriteHeader(500)
@@ -129,46 +126,36 @@ func writeFilesInSizeRangeToDir(dir string, count int, sizeRange SizeRange) (*Di
 		}
 	}
 
-	errg := new(errgroup.Group)
 	start := time.Now()
 
 	totalWritten := int64(0)
 
-	errg.SetLimit(10)
-
 	for i := range count {
 		ii := i
-		errg.Go(func() error {
-			src := srcFiles[ii%len(srcFiles)]
-			srcf, err := os.Open(src)
-			if err != nil {
-				return fmt.Errorf("open src file: %w", err)
-			}
-			defer srcf.Close()
+		src := srcFiles[ii%len(srcFiles)]
+		srcf, err := os.Open(src)
+		if err != nil {
+			return nil, fmt.Errorf("open src file: %w", err)
+		}
 
-			destf, err := os.CreateTemp(dir, "small_file_dest_*")
-			if err != nil {
-				return fmt.Errorf("open dest file: %w", err)
-			}
-			defer func() {
-				destf.Close()
-				if err := os.Remove(destf.Name()); err != nil {
-					panic(err)
-				}
-			}()
+		destf, err := os.CreateTemp(dir, "small_file_dest_*")
+		if err != nil {
+			srcf.Close()
+			return nil, fmt.Errorf("open dest file: %w", err)
+		}
 
-			if w, err := io.Copy(destf, srcf); err != nil {
-				return fmt.Errorf("copy file: %w", err)
-			} else {
-				atomic.AddInt64(&totalWritten, w)
-			}
+		w, err := io.Copy(destf, srcf)
+		srcf.Close()
+		destf.Close()
+		if err := os.Remove(destf.Name()); err != nil {
+			panic(err)
+		}
 
-			return nil
-		})
-	}
-
-	if err := errg.Wait(); err != nil {
-		return nil, fmt.Errorf("copy files: %w", err)
+		if err != nil {
+			return nil, fmt.Errorf("copy file: %w", err)
+		} else {
+			totalWritten += w
+		}
 	}
 
 	since := float32(time.Since(start)) / float32(time.Second)
