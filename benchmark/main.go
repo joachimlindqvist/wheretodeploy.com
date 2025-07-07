@@ -147,7 +147,7 @@ func writeFilesInSizeRangeToDir(dir string, count int, sizeRange SizeRange) (*Di
 	var srcFiles []string
 	srcFilesCount := 10
 
-	buf := make([]byte, 1024)
+	buf := make([]byte, 32*1024)
 
 	for i := range srcFilesCount {
 		if f, err := os.CreateTemp(dir, "small_file_src_*"); err != nil {
@@ -193,7 +193,7 @@ func writeFilesInSizeRangeToDir(dir string, count int, sizeRange SizeRange) (*Di
 			return nil, fmt.Errorf("open dest file: %w", err)
 		}
 
-		w, err := io.Copy(destf, srcf)
+		w, err := io.CopyBuffer(destf, srcf, buf)
 		srcf.Close()
 		destf.Close()
 		if err := os.Remove(destf.Name()); err != nil {
