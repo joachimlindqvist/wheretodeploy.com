@@ -100,6 +100,9 @@ func writeFilesInSizeRangeToDir(dir string, count int, sizeRange SizeRange) (*Di
 	tempDir := os.TempDir()
 	var srcFiles []string
 	srcFilesCount := 10
+
+	buf := make([]byte, 1024)
+
 	for i := range srcFilesCount {
 		if f, err := os.CreateTemp(tempDir, "small_file_src_*"); err != nil {
 			return nil, fmt.Errorf("create temp file: %w", err)
@@ -107,12 +110,12 @@ func writeFilesInSizeRangeToDir(dir string, count int, sizeRange SizeRange) (*Di
 			written := 0
 			maxSize := sizeRange.min + int(float32(sizeRange.max-sizeRange.min)*(float32(i)/float32(srcFilesCount)))
 			for written < maxSize {
-				buf := make([]byte, min(1024, maxSize-written))
 				if _, err := crand.Read(buf); err != nil {
 					f.Close()
 					return nil, fmt.Errorf("random bytes: %w", err)
 				} else {
-					if w, err := f.Write(buf); err != nil {
+					maxRead := min(1024, maxSize-written)
+					if w, err := f.Write(buf[0:maxRead]); err != nil {
 						f.Close()
 						return nil, fmt.Errorf("write to temp file: %w", err)
 					} else {
