@@ -11,67 +11,46 @@ import (
 	"time"
 )
 
+func mustGetEnv(name string) string {
+	val := os.Getenv(name)
+	if val == "" {
+		panic("envvar " + name + " must be set")
+	}
+	return val
+}
+
+var (
+	ephemeralDir  string = mustGetEnv("BM_EPHEMERAL_DIR")
+	persistentDir string = mustGetEnv("BM_PERSISTENT_DIR")
+)
+
 func main() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/persistent-storage", benchPersistentStorage)
+	mux.HandleFunc("/persistent-disk", benchPersistentDisk)
+	mux.HandleFunc("/ephemeral-disk", benchEphemeralDisk)
 
 	if err := http.ListenAndServe(":5555", mux); err != nil {
 		log.Fatalln(err)
 	}
 }
 
-func benchPersistentStorage(w http.ResponseWriter, r *http.Request) {
+func benchEphemeralDisk(w http.ResponseWriter, r *http.Request) {
 	type Response struct {
-		TinyRWPerSecond   DiskResult
-		SmallRWPerSecond  DiskResult
-		MediumRWPerSecond DiskResult
-		LargeRWPerSecond  DiskResult
-		HugeRWPerSecond   DiskResult
+		DiskBenchmarkResult
 	}
 
 	var response Response
 
 	w.Header().Add("content-type", "application/json")
 
-	tinyRWPerSecond, err := writeFilesInSizeRangeToDir(os.TempDir(), 100000, SizeRange{128, 1024})
+	diskRes, err := benchmarkRWDisk(ephemeralDir)
 	if err != nil {
 		fmt.Println(err)
 		w.WriteHeader(500)
 		return
 	}
-	response.TinyRWPerSecond = *tinyRWPerSecond
 
-	smallRWPerSecond, err := writeFilesInSizeRangeToDir(os.TempDir(), 10000, SizeRange{1024, 1024 * 1024})
-	if err != nil {
-		fmt.Println(err)
-		w.WriteHeader(500)
-		return
-	}
-	response.SmallRWPerSecond = *smallRWPerSecond
-
-	mediumRWPerSecond, err := writeFilesInSizeRangeToDir(os.TempDir(), 1000, SizeRange{1024 * 1024, 16 * 1024 * 1024})
-	if err != nil {
-		fmt.Println(err)
-		w.WriteHeader(500)
-		return
-	}
-	response.MediumRWPerSecond = *mediumRWPerSecond
-
-	largeRWPerSecond, err := writeFilesInSizeRangeToDir(os.TempDir(), 100, SizeRange{16 * 1024 * 1024, 128 * 1024 * 1024})
-	if err != nil {
-		fmt.Println(err)
-		w.WriteHeader(500)
-		return
-	}
-	response.LargeRWPerSecond = *largeRWPerSecond
-
-	hugeRWPerSecond, err := writeFilesInSizeRangeToDir(os.TempDir(), 10, SizeRange{128 * 1024 * 1024, 1024 * 1024 * 1024})
-	if err != nil {
-		fmt.Println(err)
-		w.WriteHeader(500)
-		return
-	}
-	response.HugeRWPerSecond = *hugeRWPerSecond
+	response.DiskBenchmarkResult = *diskRes
 
 	if b, err := json.Marshal(response); err != nil {
 		w.WriteHeader(500)
@@ -80,6 +59,77 @@ func benchPersistentStorage(w http.ResponseWriter, r *http.Request) {
 		w.Write(b)
 		return
 	}
+}
+
+func benchPersistentDisk(w http.ResponseWriter, r *http.Request) {
+	type Response struct {
+		DiskBenchmarkResult
+	}
+
+	var response Response
+
+	w.Header().Add("content-type", "application/json")
+
+	diskRes, err := benchmarkRWDisk(persistentDir)
+	if err != nil {
+		fmt.Println(err)
+		w.WriteHeader(500)
+		return
+	}
+
+	response.DiskBenchmarkResult = *diskRes
+
+	if b, err := json.Marshal(response); err != nil {
+		w.WriteHeader(500)
+		return
+	} else {
+		w.Write(b)
+		return
+	}
+}
+
+type DiskBenchmarkResult struct {
+	TinyRW   *DiskResult
+	SmallRW  *DiskResult
+	MediumRW *DiskResult
+	LargeRW  *DiskResult
+	HugeRW   *DiskResult
+}
+
+func benchmarkRWDisk(dir string) (*DiskBenchmarkResult, error) {
+	res := &DiskBenchmarkResult{}
+
+	if rw, err := writeFilesInSizeRangeToDir(dir, 100000, SizeRange{128, 1024}); err != nil {
+		return nil, err
+	} else {
+		res.TinyRW = rw
+	}
+
+	if rw, err := writeFilesInSizeRangeToDir(dir, 10000, SizeRange{1024, 1024 * 1024}); err != nil {
+		return nil, err
+	} else {
+		res.SmallRW = rw
+	}
+
+	if rw, err := writeFilesInSizeRangeToDir(dir, 1000, SizeRange{1024 * 1024, 16 * 1024 * 1024}); err != nil {
+		return nil, err
+	} else {
+		res.MediumRW = rw
+	}
+
+	if rw, err := writeFilesInSizeRangeToDir(dir, 100, SizeRange{16 * 1024 * 1024, 128 * 1024 * 1024}); err != nil {
+		return nil, err
+	} else {
+		res.LargeRW = rw
+	}
+
+	if rw, err := writeFilesInSizeRangeToDir(dir, 10, SizeRange{128 * 1024 * 1024, 1024 * 1024 * 1024}); err != nil {
+		return nil, err
+	} else {
+		res.HugeRW = rw
+	}
+
+	return res, nil
 }
 
 type SizeRange struct {
@@ -94,14 +144,13 @@ type DiskResult struct {
 }
 
 func writeFilesInSizeRangeToDir(dir string, count int, sizeRange SizeRange) (*DiskResult, error) {
-	tempDir := os.TempDir()
 	var srcFiles []string
 	srcFilesCount := 10
 
 	buf := make([]byte, 1024)
 
 	for i := range srcFilesCount {
-		if f, err := os.CreateTemp(tempDir, "small_file_src_*"); err != nil {
+		if f, err := os.CreateTemp(dir, "small_file_src_*"); err != nil {
 			return nil, fmt.Errorf("create temp file: %w", err)
 		} else {
 			written := 0
