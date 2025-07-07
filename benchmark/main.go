@@ -123,7 +123,7 @@ func benchmarkRWDisk(dir string) (*DiskBenchmarkResult, error) {
 		res.LargeRW = rw
 	}
 
-	if rw, err := writeFilesInSizeRangeToDir(dir, 10, SizeRange{128 * 1024 * 1024, 1024 * 1024 * 1024}); err != nil {
+	if rw, err := writeFilesInSizeRangeToDir(dir, 10, SizeRange{128 * 1024 * 1024, 512 * 1024 * 1024}); err != nil {
 		return nil, err
 	} else {
 		res.HugeRW = rw
